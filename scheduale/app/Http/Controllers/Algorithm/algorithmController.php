@@ -13,7 +13,33 @@ class algorithmController extends Controller
 
     /***************************    Query   ******************************/
 
+    public function querydoctor(){
+
+        $doctor = DB::table('doctors')
+        ->join('hiring_info','doctors.hiring_info_id','=','hiring_info.id')
+        ->join('academic_degrees','academic_degrees.id','=','hiring_info.academic_degrees_id')
+        ->join('users','doctors.user_id','=','users.id')
+        ->select(
+            'users.username',
+            'academic_degrees.priority',
+            'hiring_info.hiring_date'
+        )->get();
+        return $doctor;
+    }
+
+    public function queryacademicdegree(){
+        $priorities = DB::table('academic_degrees')
+        ->select('academic_degrees.priority')
+        ->orderBy('priority', 'desc')
+        ->get();
+        
+        return $priorities;
+
+    }
+
     public function querycourses(){
+
+        $semester = DB::table('semesters')->pluck('id')->first();
 
         $courses = DB::table('doctor_request')
             ->join('semesters','doctor_request.semester_id','=','semesters.id')  //
@@ -31,7 +57,9 @@ class algorithmController extends Controller
                 'doctor_request.lec_hour',
                 'doctor_request.state'
             )->where('doctor_request.state','accept')
+            ->where('semesters.id',$semester)
             ->get();
+
         return $courses;
     }
 
@@ -58,18 +86,21 @@ class algorithmController extends Controller
     ////////////////////////////////////    sorting     ////////////////////////////////////////
 
     function merge_sort($my_array){
-        if(count($my_array) == 1 ) return $my_array;
+        
+        if(count($my_array) == 1 )  return $my_array;
         $mid = count($my_array) / 2;
         $left = array_slice($my_array, 0, $mid);
         $right = array_slice($my_array, $mid);
-        $left = merge_sort($left);
-        $right = merge_sort($right);
-        return merge($left, $right);
+        $left = $this->merge_sort($left);
+        $right = $this->merge_sort($right);
+        return $this->merge($left, $right);
     }
+
     function merge($left, $right){
+
         $res = array();
         while (count($left) > 0 && count($right) > 0){
-            if($left[0] > $right[0]){
+            if($left[0]->hiring_date > $right[0]->hiring_date){
                 $res[] = $right[0];
                 $right = array_slice($right , 1);
             }else{
@@ -87,16 +118,47 @@ class algorithmController extends Controller
         }
         return $res;
     }
-    // $test_array = array(100, 54, 7, 2, 5, 4, 1);
-    // echo "Original Array : ";
-    // echo implode(', ',$test_array );
-    // echo "\nSorted Array :";
-    // echo implode(', ',merge_sort($test_array))."\n";
     
-    public function sorting($courses){
+    public function sorting($courses,$doctors){
+        
+        $degrees = $this->queryacademicdegree();
+        $hiring = array();
+        $hiring_sorts = array();
+        $courses_sort = array();
+        
+        foreach($degrees as $degree){
+            
+            $hiring_info = array();
+            foreach($doctors as $doctor){
+                if($degree->priority == $doctor->priority){
+                    array_push($hiring_info,$doctor);
+                }else continue;
+            }
+            if($hiring_info != null){
+                array_push($hiring,$hiring_info);
+            }else continue;
+        }
+        if(!empty($hiring)){
+            for($i=0;$i<sizeof($hiring);$i++){
+                array_push($hiring_sorts,$this->merge_sort($hiring[$i]));
+            }
+        }
+        if(!empty($hiring_sorts)){
+            foreach($hiring_sorts as $hiring_sort){
+                for($i=0;$i<sizeof($hiring_sort);$i++){
+                    foreach($courses as $course){
+                        if($hiring_sort[$i]->username == $course->doctor_name){
+                            array_push($courses_sort,$course);
+                        }else continue;
+                    }
+                }
+            }
+            return $courses_sort;
+        }
 
     }
     
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
     public $total_halls = array();
 
     public function halls($halls, $work_days){
@@ -111,30 +173,17 @@ class algorithmController extends Controller
                 }	                    
             }
         }    
-        // print_r($this->total_halls);
-        // dd($this->total_halls);
     }
 
-    public function search_course($title ,$day,$time,$end/*, $courses*/){
+    public function search_course($title ,$day,$time,$end){
 
-        //dd($courses,$title ,$day,$time);
         $courses    =$this->querycourses();
         foreach($courses as $course){
             $during_at  = date('H:i:s',strtotime('+1 hour',strtotime($course->start_at)));
             $end_at     = date('H:i:s',strtotime('+1 hour',strtotime($during_at)));
             
             $during_time= date('H:i:s',strtotime('+1 hour',strtotime($time)));
-            //$end_time=date('H:i:s',strtotime('+1 hour',strtotime($during_time)));
 
-            // if($hour==2){
-            //     if($title == $course->course_title && $day == $course->day && 
-            //     (   strtotime($time)        == strtotime($course->start_at) || strtotime($time)     == strtotime($end_at) 
-            //     ||  strtotime($end_time)    == strtotime($course->start_at) || strtotime($end_time) == strtotime($end_at))){
-                                        
-            //         //return $course;
-            //     }
-            // }
-           // if($hour==3){
                 if($title == $course->course_title && $day == $course->day && 
                     (   strtotime($time)        == strtotime($course->start_at) || strtotime($time)         == strtotime($during_at) || strtotime($time)        == strtotime($end_at)
                     ||  strtotime($during_time) == strtotime($course->start_at) || strtotime($during_time)  == strtotime($during_at) || strtotime($during_time) == strtotime($end_at)
@@ -142,23 +191,17 @@ class algorithmController extends Controller
                                        
                    return $course;
                 }
-            //}
-            
         }
         return null;
     }
 
     public function add_course($course){
-        //dd($course);
         $halls      = $this->queryhalls();
         $day        = $course->day;
         $start_at   = $course->start_at;
         $during     = date('H:i:s',strtotime('+1 hour',strtotime($start_at)));               //$during=$start_at+1;
         $end_at     = date('H:i:s',strtotime('-1 hour',strtotime($course->end_at)));                 //$end_at=$during+1;                           // for case 3 ....
-        
-        // switch($course->lec_hour){								
-            
-        //     case 2:
+
             foreach($halls as $hall){    
                 
                 if(    $this->total_halls[$hall][$day][$start_at]   == null 
@@ -171,20 +214,16 @@ class algorithmController extends Controller
                         
                         if($this->total_halls[$h][$day][$start_at] != null || $this->total_halls[$h][$day][$during] != null || $this->total_halls[$h][$day][$end_at] != null){
                         
-                            echo 'course exit => '.$course_added_title.'<br>';
                             $course_exist=$this->search_course($course_added_title,$day,$start_at,$end_at/*,$this->courses*/);
                            
                             if($course_exist == null){echo 'kkkkkkk';continue;}
                             else{
-                                echo  $course->dept_title.' , '.$course_exist->dept_title;
                                 if($course->dept_title == $course_exist->dept_title && ($course->course_title != $course_exist->prerequisite_course && $course->prerequisite_course != $course_added_title)){
                                     
-                                    echo ' <br>'.$course->course_title.' dept';
                                     return 1; 
                                 }
                                 if($course->level == $course_exist->level || $course->doctor_name == $course_exist->doctor_name){
                                     
-                                    echo' <br>'.$course->course_title.' level or doctor';
                                     return 1;
 
                                 }else continue;
@@ -194,51 +233,10 @@ class algorithmController extends Controller
                     $this->total_halls[$hall][$day][$start_at] = $course->course_title;
                     $this->total_halls[$hall][$day][$during]   = $course->course_title;
                     $this->total_halls[$hall][$day][$end_at]   = $course->course_title;
-                    echo '  <br>'.$course->course_title.' => title <br>';
                     return 0;        
                 }else continue;
             }
-            // case 3:
-            // foreach($halls as $hall){    
-            
-            //     if($this->total_halls[$hall][$day][$start_at] == null && $this->total_halls[$hall][$day][$during] == null && $this->total_halls[$hall][$day][$end_at] == null)
-            //     {
-            //         foreach($halls as $h){
-                        
-            //             $course_added_title=$this->total_halls[$h][$day][$start_at];
-                        
-            //             if($this->total_halls[$h][$day][$start_at] != null || $this->total_halls[$h][$day][$during] != null || $this->total_halls[$h][$day][$end_at] != null){
-                        
-            //                 echo 'course exit => '.$course_added_title.'<br>';
-            //                 $course_exist=$this->search_course($course_added_title,$day,$start_at,3/*,$this->courses*/);
-                           
-            //                 if($course_exist==null){echo 'kkkkkkk';continue;}
-            //                 else{
-            //                     echo  $course->dept_title.' , '.$course_exist->dept_title;
-            //                     if($course->dept_title == $course_exist->dept_title && ($course->course_title != $course_exist->prerequisite_course && $course->prerequisite_course != $course_added_title)){
-                                    
-            //                         echo ' <br>'.$course->course_title.' dept';
-            //                         return 1;
-                                    
-            //                     }
-            //                     if($course->level == $course_exist->level || $course->doctor_name == $course_exist->doctor_name){
-                                    
-            //                         echo' <br>'.$course->course_title.' level or doctor';
-            //                         return 1;
-
-            //                     }else continue;
-            //                 }    
-            //             }else continue;
-            //         }
-            //         $this->total_halls[$hall][$day][$start_at] = $course->course_title;
-            //         $this->total_halls[$hall][$day][$during]   = $course->course_title;
-            //         echo '  <br>'.$course->course_title.' => title <br>';
-            //         return 0;        
-            //     }else continue;
-            // }
-            echo'gggggg';
             return 1;    
-        //}
     }
 
     public function recommended_course($course){
@@ -246,17 +244,13 @@ class algorithmController extends Controller
         $halls      = $this->queryhalls();
         $work_days  = $this->querywork_day();
         $m=0;
-        // switch($course->lec_hour){								
-            
-        //     case 2:
+
             foreach($halls as $hall){ 						
                 foreach($work_days as $workday){
                     $day = $workday->day;
 
-                    //$j=$workday->start_at;
                     for($j = $workday->start_at;strtotime($j) <= strtotime($workday->end_at);$j = date('H:i:s',strtotime('+1 hour',strtotime($j)))){
                         
-                        //$this->total_halls[$hall][$workday->day][$j]=null;
                         $during = date('H:i:s',strtotime('+1 hour',strtotime($j)));
                         $end_at;
                         if($course->lec_hour == 2){
@@ -266,8 +260,7 @@ class algorithmController extends Controller
 
                             $end_at = date('H:i:s',strtotime('+1 hour',strtotime($during)));
                         }
-                        //dd($during,$end_at ,$workday->end_at);
-                        //dd($workday ,$this->total_halls);
+
                         if(     $this->total_halls[$hall][$day][$j]      == null 
                             &&  $this->total_halls[$hall][$day][$during] == null 
                             &&  $this->total_halls[$hall][$day][$end_at] == null){
@@ -279,56 +272,45 @@ class algorithmController extends Controller
                                 if($this->total_halls[$h][$day][$j] != null || $this->total_halls[$h][$day][$during] != null || $this->total_halls[$h][$day][$end_at] != null){  
                                     $course_added_title=$this->total_halls[$h][$day][$j];
                                     if($course_added_title==null){continue;}
-                                    echo 'recommended_course '.$course_added_title;
                                     
-                                    $course_exist=$this->search_course($course_added_title,$day,$j/*,$this->courses*/);
+                                    $course_exist=$this->search_course($course_added_title,$day,$j);
                                 
-                                    if($course_exist==null){echo '<br> recommended kkkkkkk<br> ';continue;}
+                                    if($course_exist==null){continue;}
                                     else{
                                         
                                         if($course->dept_title == $course_exist->dept_title && ($course->course_title != $course_exist->prerequisite_course && $course->prerequisite_course != $course_added_title)){
                                             
-                                            echo ' <br>'.$course->course_title.' recommended dept';
                                             $xx++;
-                                            //dd($xx);
                                             break;
-                                            
                                         }
                                         if($course->level == $course_exist->level || $course->doctor_name == $course_exist->doctor_name){
                                             
-                                            echo' <br>'.$course->course_title.' recommended level or doctor';
                                             $xx++;
                                             break;        
                                         }else continue;
                                     }    
                                 }else continue;
-                                    
                             }
                             if($xx==0){
                                 $this->total_halls[$hall][$day][$j]         = $course->course_title;
                                 $this->total_halls[$hall][$day][$during]    = $course->course_title;
                                 $this->total_halls[$hall][$day][$end_at]    = $course->course_title;
-                                echo '  <br>'.$xx.' '.$course->course_title.' => title recommended <br>';
                                 return 0;
                             }else continue;
-                            
                         }
-                        // $j= date('H:i:s',strtotime('+1 hour',strtotime($j)));
                     }	                    
                 }
            }
-            //echo ' xx => '.$xx;
             return 1;
-        //}    
     }
-
 
 
 /**********************************   Main function       *******************************/
     public function index()
     {
         
-        $courses    =$this->querycourses();
+        $courses_request    =$this->querycourses();
+        $doctors    =$this->querydoctor();
         $conflicted =array();
         $conflict   =array();
         $halls      =$this->queryhalls();
@@ -337,32 +319,30 @@ class algorithmController extends Controller
         if(!empty($halls) && !empty($work_days)){
 
             $this->halls($halls,$work_days);
-        }
-        if(!empty($courses) ){
 
-            foreach($courses as $course){
+            $courses = $this->sorting($courses_request,$doctors);
+            if(!empty($courses) ){
                 
-                $recommended=$this->add_course($course);
-                if($recommended  == 0){
-                    continue;
-                }else {
-                    array_push($conflicted,$course);
-                    echo '<br> conflicted <hr>';
-                    print_r( $course);
+                foreach($courses as $course){
+                    
+                    $recommended=$this->add_course($course);
+                    if($recommended  == 0){
+                        continue;
+                    }else {
+                        array_push($conflicted,$course);
+                    }
                 }
             }
-        }
-        if(!empty($conflicted) ){
-            shuffle($conflicted);
-            
-            foreach($conflicted as $course){
-                $added=$this->recommended_course($course);
-                if($added  == 0){
-                    continue;
-                }else {
-                    array_push($conflict,$course);
-                    echo '<br> conflict KK <hr>';
-                    print_r($course);
+            if(!empty($conflicted) ){
+                shuffle($conflicted);
+                
+                foreach($conflicted as $course){
+                    $added=$this->recommended_course($course);
+                    if($added  == 0){
+                        continue;
+                    }else {
+                        array_push($conflict,$course);
+                    }
                 }
             }
         }
